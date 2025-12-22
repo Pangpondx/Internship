@@ -1,0 +1,62 @@
+#include <SPI.h>
+#include <Ethernet.h>
+#include <EthernetUdp.h>
+
+// โครงสร้างข้อมูล 1 ไบต์ตามตาราง Excel
+struct GimbalData {
+  unsigned char LS_ARM_EXT       : 1; // Bit 0
+  unsigned char LS_INTL_EXT      : 1; // Bit 1
+  unsigned char LS_ES_EXT        : 1; // Bit 2
+  unsigned char LS_NES_EXT       : 1; // Bit 3
+  unsigned char ANN_ARM_EXT      : 1; // Bit 4
+  unsigned char ANN_FIRE_EXT     : 1; // Bit 5
+  unsigned char VDC_28_PRT_EXT   : 1; // Bit 6
+  unsigned char PWR_OFF_DSCR_EXT : 1; // Bit 7
+};
+
+GimbalData data;
+
+// ตั้งค่า Network (Private IP ของบอร์ด)
+byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
+IPAddress ip(10, 136, 119, 7); 
+unsigned int localPort = 8888;
+EthernetUDP Udp;
+
+unsigned long lastSend = 0;
+
+void setup() {
+  // กำหนดขา Pin ตามวงจร (Outputs = Transistor/Relay, Inputs = Opto)
+  pinMode(2, OUTPUT); pinMode(4, OUTPUT); pinMode(8, OUTPUT); pinMode(3, OUTPUT); 
+  pinMode(11, INPUT); pinMode(5, INPUT); pinMode(10, INPUT); pinMode(9, INPUT);   
+
+  Ethernet.begin(mac, ip);
+  Udp.begin(localPort);
+}
+
+void loop() {
+  // 1. อ่านสถานะปุ่ม/Sensor (T) มาเก็บไว้ใน Struct
+  data.LS_INTL_EXT = digitalRead(11);
+  data.LS_NES_EXT = digitalRead(5);
+  data.ANN_ARM_EXT = digitalRead(10);
+  data.ANN_FIRE_EXT = digitalRead(9);
+
+  // 2. รับข้อมูล UDP (R) - ฟังที่ Private IP ของตัวเอง (10.136.119.7)
+  int packetSize = Udp.parsePacket();
+  if (packetSize > 0) {
+    Udp.read((char*)&data, 1);
+    // นำบิตที่รับมาไปสั่งงาน Digital Out
+    digitalWrite(2, data.LS_ARM_EXT);
+    digitalWrite(4, data.LS_ES_EXT);
+    digitalWrite(8, data.VDC_28_PRT_EXT);
+    digitalWrite(3, data.PWR_OFF_DSCR_EXT);
+  }
+
+  // 3. ส่งข้อมูลออก (T) แบบ Broadcast ทุก 200ms (5Hz)
+  if (millis() - lastSend >= 200) {
+    lastSend = millis();
+    // เปลี่ยนเป็น 255.255.255.255 เพื่อส่งหาทุกเครื่องในวงแลน
+    Udp.beginPacket(IPAddress(255, 255, 255, 255), 8888); 
+    Udp.write((byte*)&data, 1);
+    Udp.endPacket();
+  }
+}
