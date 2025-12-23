@@ -1,0 +1,29 @@
+#define MCU_LS_ARM_EXT 2 //out
+#define MCU_POWER_OFF 3 //out
+#define MCU_LS_ES_EXT 4 //out
+#define MCU_LS_NES_EXT 5 //out
+#define MCU_28V_PRT 8 //in
+#define MCU_FIRE_ANN 9 //in
+#define MCU_ARM_ANN 10 //in
+#define MCU_INTERLOCK 11 //in
+void setup() {
+Serial.begin(9600);
+pinMode(MCU_LS_ARM_EXT,OUTPUT);
+pinMode(MCU_POWER_OFF,OUTPUT);
+pinMode(MCU_LS_ES_EXT,OUTPUT);
+pinMode(MCU_LS_NES_EXT,OUTPUT);
+pinMode(MCU_28V_PRT,INPUT);
+pinMode(MCU_FIRE_ANN,INPUT);
+pinMode(MCU_ARM_ANN,INPUT);
+pinMode(MCU_INTERLOCK,INPUT);
+}
+void loop() {
+digitalWrite(MCU_LS_ARM_EXT,HIGH);
+digitalWrite(MCU_POWER_OFF,HIGH);
+digitalWrite(MCU_LS_ES_EXT,HIGH);
+digitalWrite(MCU_LS_NES_EXT,HIGH);
+Serial.print("28V : "); Serial.print(digitalRead(MCU_28V_PRT));
+Serial.print(" | FIRE : "); Serial.print(digitalRead(MCU_FIRE_ANN));
+Serial.print(" | ARM : "); Serial.print(digitalRead(MCU_ARM_ANN));
+Serial.print(" | INTERLOCK : "); Serial.println(digitalRead(MCU_INTERLOCK));
+}
