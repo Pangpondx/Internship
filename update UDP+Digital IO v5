@@ -1,0 +1,146 @@
+#include <SPI.h>
+#include <Ethernet.h>
+#include <TimerOne.h>
+struct Gimbal{
+  unsigned int LS_ARM_EXT : 1; //bit 0
+  unsigned int LS_INTL_EXT : 1; //bit 1
+  unsigned int LS_ES_EXT : 1; //bit 2
+  unsigned int LS_NES_EXT : 1; //bit 3
+  unsigned int ANN_ARM_EXT : 1; //bit 4
+  unsigned int ANN_FIRE_EXT : 1; //bit 5
+  unsigned int VDC28_PRT_EXT : 1; //bit 6
+  unsigned int PWR_OFF_DSCT_EXT : 1; //bit 7
+};
+Gimbal data;
+
+#define MCU_LS_ARM_EXT 2 //pinout
+#define MCU_POWER_OFF 3 //pinout
+#define MCU_LS_ES_EXT 4 //pinout
+#define MCU_LS_NES_EXT 5 //pinout
+#define MCU_28V_PRT 6 //pinin
+#define MCU_FIRE_ANN 7 //pinin
+#define MCU_ARM_ANN 8 //pinin
+#define MCU_INTERLOCK 9 //pinin
+
+byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
+IPAddress ip(192, 168, 200, 8);
+IPAddress destIp(192, 168, 200, 255);
+unsigned int localPort = 1161;
+EthernetUDP Udp;
+char packetBuffer[UDP_TX_PACKET_MAX_SIZE];
+
+//unsigned long previousMillis = 0;
+//const int interval = 200;
+unsigned long previousTimeUdp = 0;
+const int intervalTimeUdp = 10000;
+bool timerFlagTX = false;
+bool timerFlagRX = false;
+int timerCount = 0;
+
+
+void setup(){
+  Serial.begin(9600);
+  pinMode(MCU_LS_ARM_EXT,OUTPUT);
+  pinMode(MCU_POWER_OFF,OUTPUT);
+  pinMode(MCU_LS_ES_EXT,OUTPUT);
+  pinMode(MCU_LS_NES_EXT,OUTPUT);
+
+  pinMode(MCU_28V_PRT,INPUT);
+  pinMode(MCU_FIRE_ANN,INPUT);
+  pinMode(MCU_ARM_ANN,INPUT);
+  pinMode(MCU_INTERLOCK,INPUT);
+
+  Ethernet.begin(mac,ip);
+  Udp.begin(localPort);
+
+  Timer1.initialize(10000);
+  Timer1.attachInterrupt(timerISR);
+  //Timer2.initialize(200000);
+  //Timer2.attachInterrupt(timerISRRX);
+  
+}
+void loop(){
+  if(timerFlagRX){
+  timerFlagRX = false;
+  unsigned long currentTimeUdp = millis();
+  int packetSize = Udp.parsePacket();
+  if(packetSize > 0){
+    //Serial.println("Come to state else!!");
+    //Serial.print("Received packet of size ");
+    //Serial.println(packetSize);
+    //Serial.print("From IP : ");
+
+    IPAddress remote = Udp.remoteIP();
+    //Serial.print(remote);
+
+    //Serial.print(" on port : ");
+    //Serial.println(Udp.remotePort());
+
+    Udp.read(packetBuffer, UDP_TX_PACKET_MAX_SIZE);
+    int bit0 = bitRead(packetBuffer[0], 0);
+    digitalWrite(MCU_LS_ARM_EXT, bit0);
+    data.LS_ARM_EXT = bit0;
+    //Serial.print("bit 0 : "); Serial.println(bit0);
+    int bit2 = bitRead(packetBuffer[0], 2);
+    digitalWrite(MCU_LS_ES_EXT, bit2);
+    data.LS_ES_EXT = bit2;
+    //Serial.print("bit 2 : "); Serial.println(bit2);
+    int bit3 = bitRead(packetBuffer[0], 3);
+    digitalWrite(MCU_LS_NES_EXT, bit3);
+    data.LS_NES_EXT = bit3;
+    //Serial.print("bit 3 : "); Serial.println(bit3);
+    int bit7 = bitRead(packetBuffer[0], 7);
+    digitalWrite(MCU_POWER_OFF, bit7);
+    data.PWR_OFF_DSCT_EXT = bit7;
+    //Serial.print("bit 7 : "); Serial.println(bit7);
+    previousTimeUdp = currentTimeUdp;
+   }
+  if(currentTimeUdp - previousTimeUdp >= intervalTimeUdp){
+    //previousTimeUdp = currentTimeUdp;
+    //Serial.println("Come to state if!!");
+    data.LS_ARM_EXT = 0;
+    digitalWrite(MCU_LS_ARM_EXT, 0);
+    //Serial.println("bit 0 : 0");
+    data.LS_ES_EXT = 0;
+    digitalWrite(MCU_LS_ES_EXT, 0);
+    //Serial.println("bit 2 : 0");
+    data.LS_NES_EXT = 0;
+    digitalWrite(MCU_LS_NES_EXT, 0);
+    //Serial.println("bit 3 : 0");
+    data.PWR_OFF_DSCT_EXT = 0;
+    digitalWrite(MCU_POWER_OFF, 0);
+    //Serial.println("bit 7 : 0");
+   }
+  //Serial.println("---INPUT---");
+  int dataINTL = digitalRead(MCU_INTERLOCK);
+  data.LS_INTL_EXT = dataINTL;
+  //Serial.print("bit 1 : "); Serial.println(dataINTL);
+  int dataARM = digitalRead(MCU_ARM_ANN);
+  data.ANN_ARM_EXT = dataARM;
+  //Serial.print("bit 4 : "); Serial.println(dataARM);
+  int dataFIRE = digitalRead(MCU_FIRE_ANN);
+  data.ANN_FIRE_EXT = dataFIRE;
+  //Serial.print("bit 5 : "); Serial.println(dataFIRE);
+  int dataVDC = digitalRead(MCU_28V_PRT);
+  data.VDC28_PRT_EXT = dataVDC;
+  //Serial.print("bit 6 : "); Serial.println(dataVDC);
+  
+  if(timerFlagTX){
+    timerFlagTX = false;
+    byte packet[sizeof(Gimbal)];
+    memcpy(packet, &data, sizeof(Gimbal)); //ปลายทาง, ต้นทาง, ขนาด
+    Udp.beginPacket(destIp, localPort);
+    Udp.write(packet, sizeof(packet));
+    Udp.endPacket();
+    //Serial.println("Sent success!!!"); Serial.println("--------------------");
+    }
+  }
+}
+void timerISR(){
+  timerFlagRX = true;
+  timerCount++;
+  if(timerCount >= 20){
+    timerFlagTX = true;
+    timerCount = 0;
+  }
+}
