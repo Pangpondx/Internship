@@ -99,16 +99,16 @@ void loop() {
       digitalWrite(MCU_POWER_OFF, 0);
     }
 
-    if (data.LS_INTL_EXT = digitalRead(MCU_INTERLOCK)) {
+    if (data.LS_INTL_EXT != digitalRead(MCU_INTERLOCK)) {
       data.LS_INTL_EXT = digitalRead(MCU_INTERLOCK);
     }
-    if (data.ANN_ARM_EXT = digitalRead(MCU_ARM_ANN)) {
+    if (data.ANN_ARM_EXT != digitalRead(MCU_ARM_ANN)) {
       data.ANN_ARM_EXT = digitalRead(MCU_ARM_ANN);
     }
-    if (data.ANN_FIRE_EXT = digitalRead(MCU_FIRE_ANN)) {
+    if (data.ANN_FIRE_EXT != digitalRead(MCU_FIRE_ANN)) {
       data.ANN_FIRE_EXT = digitalRead(MCU_FIRE_ANN);
     }
-    if (data.VDC28_PRT_EXT = digitalRead(MCU_28V_PRT)) {
+    if (data.VDC28_PRT_EXT != digitalRead(MCU_28V_PRT)) {
       data.VDC28_PRT_EXT = digitalRead(MCU_28V_PRT);
     }
   }
