@@ -26,6 +26,7 @@ byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
 IPAddress ip(192, 168, 200, 8);
 IPAddress destIp(192, 168, 200, 255);
 unsigned int localPort = 1161;
+unsigned int destPort = 1150;
 EthernetUDP Udp;
 char packetBuffer[UDP_TX_PACKET_MAX_SIZE];
 
@@ -37,6 +38,15 @@ bool timerFlagTX = false;
 bool timerFlagRX = false;
 int timerCount = 0;
 
+//for debug
+int dataINTL;
+int dataARM;
+int dataFIRE;
+int dataVDC;
+int bit0;
+int bit2;
+int bit3;
+int bit7;
 
 void setup(){
   Serial.begin(9600);
@@ -62,6 +72,7 @@ void setup(){
 void loop(){
   if(timerFlagRX){
   timerFlagRX = false;
+  Serial.print("data : "); Serial.print(bit7); Serial.print(dataVDC); Serial.print(dataFIRE); Serial.print(dataARM); Serial.print(bit3); Serial.print(bit2); Serial.print(dataINTL); Serial.println(bit0);
   unsigned long currentTimeUdp = millis();
   int packetSize = Udp.parsePacket();
   if(packetSize > 0){
@@ -77,19 +88,19 @@ void loop(){
     //Serial.println(Udp.remotePort());
 
     Udp.read(packetBuffer, UDP_TX_PACKET_MAX_SIZE);
-    int bit0 = bitRead(packetBuffer[0], 0);
+    bit0 = bitRead(packetBuffer[0], 0);
     digitalWrite(MCU_LS_ARM_EXT, bit0);
     data.LS_ARM_EXT = bit0;
     //Serial.print("bit 0 : "); Serial.println(bit0);
-    int bit2 = bitRead(packetBuffer[0], 2);
+    bit2 = bitRead(packetBuffer[0], 2);
     digitalWrite(MCU_LS_ES_EXT, bit2);
     data.LS_ES_EXT = bit2;
     //Serial.print("bit 2 : "); Serial.println(bit2);
-    int bit3 = bitRead(packetBuffer[0], 3);
+    bit3 = bitRead(packetBuffer[0], 3);
     digitalWrite(MCU_LS_NES_EXT, bit3);
     data.LS_NES_EXT = bit3;
     //Serial.print("bit 3 : "); Serial.println(bit3);
-    int bit7 = bitRead(packetBuffer[0], 7);
+    bit7 = bitRead(packetBuffer[0], 7);
     digitalWrite(MCU_POWER_OFF, bit7);
     data.PWR_OFF_DSCT_EXT = bit7;
     //Serial.print("bit 7 : "); Serial.println(bit7);
@@ -112,33 +123,33 @@ void loop(){
     //Serial.println("bit 7 : 0");
    }
   //Serial.println("---INPUT---");
-  int dataINTL = digitalRead(MCU_INTERLOCK);
+  dataINTL = digitalRead(MCU_INTERLOCK);
   data.LS_INTL_EXT = dataINTL;
   //Serial.print("bit 1 : "); Serial.println(dataINTL);
-  int dataARM = digitalRead(MCU_ARM_ANN);
+  dataARM = digitalRead(MCU_ARM_ANN);
   data.ANN_ARM_EXT = dataARM;
   //Serial.print("bit 4 : "); Serial.println(dataARM);
-  int dataFIRE = digitalRead(MCU_FIRE_ANN);
+  dataFIRE = digitalRead(MCU_FIRE_ANN);
   data.ANN_FIRE_EXT = dataFIRE;
   //Serial.print("bit 5 : "); Serial.println(dataFIRE);
-  int dataVDC = digitalRead(MCU_28V_PRT);
+  dataVDC = digitalRead(MCU_28V_PRT);
   data.VDC28_PRT_EXT = dataVDC;
   //Serial.print("bit 6 : "); Serial.println(dataVDC);
-  
+  //Serial.print("data : "); Serial.print(bit0); Serial.print(dataINTL); Serial.print(bit2); Serial.print(bit3); Serial.print(dataARM); Serial.print(dataFIRE); Serial.print(dataVDC); Serial.println(bit7);
+  }
   if(timerFlagTX){
     timerFlagTX = false;
     byte packet[sizeof(Gimbal)];
     memcpy(packet, &data, sizeof(Gimbal)); //ปลายทาง, ต้นทาง, ขนาด
-    Udp.beginPacket(destIp, localPort);
+    Udp.beginPacket(destIp, destPort);
     Udp.write(packet, sizeof(packet));
     Udp.endPacket();
     //Serial.println("Sent success!!!"); Serial.println("--------------------");
     }
-  }
 }
 void timerISR(){
   timerFlagRX = true;
-  timerCount++;
+  timerCount++; //1ทริค = 10 ms 10*20 = 200 ms
   if(timerCount >= 20){
     timerFlagTX = true;
     timerCount = 0;
