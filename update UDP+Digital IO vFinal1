@@ -1,0 +1,146 @@
+#include <SPI.h>
+#include <Ethernet.h>
+#include <TimerOne.h>
+#include <stdint.h>
+
+typedef struct {
+  uint8_t LS_ARM_EXT : 1;         // bit 0
+  uint8_t LS_INTL_EXT : 1;        // bit 1
+  uint8_t LS_ES_EXT : 1;          // bit 2
+  uint8_t LS_NES_EXT : 1;         // bit 3
+  uint8_t ANN_ARM_EXT : 1;        // bit 4
+  uint8_t ANN_FIRE_EXT : 1;       // bit 5
+  uint8_t VDC28_PRT_EXT : 1;      // bit 6
+  uint8_t PWR_OFF_DSCT_EXT : 1;   // bit 7
+} ARGOS8_CONTROL_T;
+
+ARGOS8_CONTROL_T Input_UDP;
+ARGOS8_CONTROL_T Output_UDP;
+
+#define MCU_LS_ARM_EXT 2   // pinout
+#define MCU_POWER_OFF 3    // pinout
+#define MCU_LS_ES_EXT 4    // pinout
+#define MCU_LS_NES_EXT 5   // pinout
+#define MCU_28V_PRT 6      // pinin
+#define MCU_FIRE_ANN 7     // pinin
+#define MCU_ARM_ANN 8      // pinin
+#define MCU_INTERLOCK 9    // pinin
+
+byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
+IPAddress ip(192, 168, 200, 8);
+IPAddress destIp(192, 168, 200, 255);
+uint8_t localPort = 1161;
+uint8_t destPort = 1150;
+EthernetUDP Udp;
+char packetBuffer[UDP_TX_PACKET_MAX_SIZE];
+
+unsigned long previousTimeUdp = 0;
+const int intervalTimeUdp = 10000;
+bool timerFlag5Hz = false;
+bool timerFlag100Hz = false;
+uint8_t timerCount = 0;
+
+void setup() {
+  Serial.begin(9600);
+  pinMode(MCU_LS_ARM_EXT, OUTPUT);
+  pinMode(MCU_POWER_OFF, OUTPUT);
+  pinMode(MCU_LS_ES_EXT, OUTPUT);
+  pinMode(MCU_LS_NES_EXT, OUTPUT);
+
+  digitalWrite(MCU_LS_ARM_EXT, 0);
+  digitalWrite(MCU_LS_ES_EXT, 0);
+  digitalWrite(MCU_LS_NES_EXT, 0);
+  digitalWrite(MCU_POWER_OFF, 0);
+
+  pinMode(MCU_28V_PRT, INPUT);
+  pinMode(MCU_FIRE_ANN, INPUT);
+  pinMode(MCU_ARM_ANN, INPUT);
+  pinMode(MCU_INTERLOCK, INPUT);
+
+  Ethernet.begin(mac, ip);
+  Udp.begin(localPort);
+
+  Timer1.initialize(10000);
+  Timer1.attachInterrupt(timerISR);
+}
+
+void loop() {
+  if (timerFlag100Hz) {
+    timerFlag100Hz = false;
+
+    // For debug
+    Serial.print("data : ");
+    Serial.print(Output_UDP.PWR_OFF_DSCT_EXT);
+    Serial.print(Output_UDP.VDC28_PRT_EXT);
+    Serial.print(Output_UDP.ANN_FIRE_EXT);
+    Serial.print(Output_UDP.ANN_ARM_EXT);
+    Serial.print(" ");
+    Serial.print(Output_UDP.LS_NES_EXT);
+    Serial.print(Output_UDP.LS_ES_EXT);
+    Serial.print(Output_UDP.LS_INTL_EXT);
+    Serial.println(Output_UDP.LS_ARM_EXT);
+
+    unsigned long currentTimeUdp = millis();
+    int packetSize = Udp.parsePacket();
+
+    if (packetSize == 1) {
+      Udp.read(packetBuffer, 1);
+      Output_UDP.LS_ARM_EXT = bitRead(packetBuffer[0], 0);
+      digitalWrite(MCU_LS_ARM_EXT, Output_UDP.LS_ARM_EXT);
+      Output_UDP.LS_ES_EXT = bitRead(packetBuffer[0], 2);
+      digitalWrite(MCU_LS_ES_EXT, Output_UDP.LS_ES_EXT);
+      Output_UDP.LS_NES_EXT = bitRead(packetBuffer[0], 3);
+      digitalWrite(MCU_LS_NES_EXT, Output_UDP.LS_NES_EXT);
+      Output_UDP.PWR_OFF_DSCT_EXT = bitRead(packetBuffer[0], 7);
+      digitalWrite(MCU_POWER_OFF, Output_UDP.PWR_OFF_DSCT_EXT);
+      previousTimeUdp = currentTimeUdp;
+    }
+
+    if (currentTimeUdp - previousTimeUdp >= intervalTimeUdp) {
+      Output_UDP.LS_ARM_EXT = 0;
+      digitalWrite(MCU_LS_ARM_EXT, 0);
+      Output_UDP.LS_ES_EXT = 0;
+      digitalWrite(MCU_LS_ES_EXT, 0);
+      Output_UDP.LS_NES_EXT = 0;
+      digitalWrite(MCU_LS_NES_EXT, 0);
+      Output_UDP.PWR_OFF_DSCT_EXT = 0;
+      digitalWrite(MCU_POWER_OFF, 0);
+    }
+
+    Input_UDP.LS_INTL_EXT = digitalRead(MCU_INTERLOCK);
+    if (Output_UDP.LS_INTL_EXT != Input_UDP.LS_INTL_EXT) {
+      Output_UDP.LS_INTL_EXT = Input_UDP.LS_INTL_EXT;
+    }
+
+    Input_UDP.ANN_ARM_EXT = digitalRead(MCU_ARM_ANN);
+    if (Output_UDP.ANN_ARM_EXT != Input_UDP.ANN_ARM_EXT) {
+      Output_UDP.ANN_ARM_EXT = Input_UDP.ANN_ARM_EXT;
+    }
+
+    Input_UDP.ANN_FIRE_EXT = digitalRead(MCU_FIRE_ANN);
+    if (Output_UDP.ANN_FIRE_EXT != Input_UDP.ANN_FIRE_EXT) {
+      Output_UDP.ANN_FIRE_EXT = Input_UDP.ANN_FIRE_EXT;
+    }
+
+    Input_UDP.VDC28_PRT_EXT = digitalRead(MCU_28V_PRT);
+    if (Output_UDP.VDC28_PRT_EXT != Input_UDP.VDC28_PRT_EXT) {
+      Output_UDP.VDC28_PRT_EXT = Input_UDP.VDC28_PRT_EXT;
+    }
+  }
+
+  if (timerFlag5Hz) {
+    timerFlag5Hz = false;
+    Udp.beginPacket(destIp, destPort);
+    Udp.write((byte*)&Output_UDP, sizeof(ARGOS8_CONTROL_T));
+    Udp.endPacket();
+  }
+}
+
+void timerISR() {
+  timerFlag100Hz = true;
+  timerCount++; // 1 ทริค = 10 ms, 10 * 20 = 200 ms
+  if (timerCount >= 20) {
+    timerFlag5Hz = true;
+    timerCount = 0;
+  }
+}
