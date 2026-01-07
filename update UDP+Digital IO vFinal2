@@ -83,16 +83,14 @@ void loop() {
     uint8_t packetSize = Udp.parsePacket();
  
     if (packetSize > 0) {
-      char packetBuffer[8];
+      uint8_t packetBuffer[1];
       Udp.read(packetBuffer, packetSize);
+      
       if (packetSize == 1){
-      Buffer_Udp.LS_ARM_EXT = bitRead(packetBuffer[0], 0);
+      memcpy(&Buffer_Udp, &packetBuffer, 1);
       digitalWrite(MCU_LS_ARM_EXT, Buffer_Udp.LS_ARM_EXT);
-      Buffer_Udp.LS_ES_EXT = bitRead(packetBuffer[0], 2);
       digitalWrite(MCU_LS_ES_EXT, Buffer_Udp.LS_ES_EXT);
-      Buffer_Udp.LS_NES_EXT = bitRead(packetBuffer[0], 3);
       digitalWrite(MCU_LS_NES_EXT, Buffer_Udp.LS_NES_EXT);
-      Buffer_Udp.PWR_OFF_DSCT_EXT = bitRead(packetBuffer[0], 7);
       digitalWrite(MCU_POWER_OFF, Buffer_Udp.PWR_OFF_DSCT_EXT);
       previousTimeUdp = currentTimeUdp;
       }
