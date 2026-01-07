@@ -1,0 +1,141 @@
+#include <SPI.h>
+#include <Ethernet.h>
+#include <TimerOne.h>
+#include <stdint.h>
+ 
+typedef struct {
+  uint8_t LS_ARM_EXT : 1;         // bit 0
+  uint8_t LS_INTL_EXT : 1;        // bit 1
+  uint8_t LS_ES_EXT : 1;          // bit 2
+  uint8_t LS_NES_EXT : 1;         // bit 3
+  uint8_t ANN_ARM_EXT : 1;        // bit 4
+  uint8_t ANN_FIRE_EXT : 1;       // bit 5
+  uint8_t VDC28_PRT_EXT : 1;      // bit 6
+  uint8_t PWR_OFF_DSCT_EXT : 1;   // bit 7
+} ARGOS8_CONTROL_T;
+
+ARGOS8_CONTROL_T Buffer_Udp;
+ 
+#define MCU_LS_ARM_EXT 2   // pinout
+#define MCU_POWER_OFF 3    // pinout
+#define MCU_LS_ES_EXT 4    // pinout
+#define MCU_LS_NES_EXT 5   // pinout
+#define MCU_28V_PRT 6      // pinin
+#define MCU_FIRE_ANN 7     // pinin
+#define MCU_ARM_ANN 8      // pinin
+#define MCU_INTERLOCK 9    // pinin
+ 
+byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
+IPAddress ip(192, 168, 200, 8);
+IPAddress destIp(192, 168, 200, 255);
+uint16_t localPort = 1161;
+uint16_t destPort = 1150;
+EthernetUDP Udp;
+ 
+uint32_t previousTimeUdp = 0;
+const uint16_t intervalTimeUdp = 10000;
+bool timerFlag5Hz = false;
+bool timerFlag100Hz = false;
+uint8_t timerCount = 0;
+uint8_t trickTimer = 20; //10 * 20 = 200 ms
+uint8_t lastDataINTL = 0;
+uint8_t debounceDelay = 50;
+ 
+void setup() {
+  Serial.begin(9600);
+  pinMode(MCU_LS_ARM_EXT, OUTPUT);
+  pinMode(MCU_POWER_OFF, OUTPUT);
+  pinMode(MCU_LS_ES_EXT, OUTPUT);
+  pinMode(MCU_LS_NES_EXT, OUTPUT);
+ 
+  digitalWrite(MCU_LS_ARM_EXT, 0);
+  digitalWrite(MCU_LS_ES_EXT, 0);
+  digitalWrite(MCU_LS_NES_EXT, 0);
+  digitalWrite(MCU_POWER_OFF, 0);
+ 
+  pinMode(MCU_28V_PRT, INPUT);
+  pinMode(MCU_FIRE_ANN, INPUT);
+  pinMode(MCU_ARM_ANN, INPUT);
+  pinMode(MCU_INTERLOCK, INPUT);
+ 
+  Ethernet.begin(mac, ip);
+  Udp.begin(localPort);
+ 
+  Timer1.initialize(10000);
+  Timer1.attachInterrupt(timerISR);
+}
+ 
+void loop() {
+  if (timerFlag100Hz) {
+    timerFlag100Hz = false;
+ 
+    // For debug
+    Serial.print("data : ");
+    Serial.print(Buffer_Udp.PWR_OFF_DSCT_EXT);
+    Serial.print(Buffer_Udp.VDC28_PRT_EXT);
+    Serial.print(Buffer_Udp.ANN_FIRE_EXT);
+    Serial.print(Buffer_Udp.ANN_ARM_EXT);
+    Serial.print(" ");
+    Serial.print(Buffer_Udp.LS_NES_EXT);
+    Serial.print(Buffer_Udp.LS_ES_EXT);
+    Serial.print(Buffer_Udp.LS_INTL_EXT);
+    Serial.println(Buffer_Udp.LS_ARM_EXT);
+ 
+    uint32_t currentTimeUdp = millis();
+    uint8_t packetSize = Udp.parsePacket();
+ 
+    if (packetSize > 0) {
+      uint8_t packetBuffer[1];
+      Udp.read(packetBuffer, packetSize);
+      
+      if (packetSize == 1){
+      memcpy(&Buffer_Udp, &packetBuffer, 1);
+      digitalWrite(MCU_LS_ARM_EXT, Buffer_Udp.LS_ARM_EXT);
+      digitalWrite(MCU_LS_ES_EXT, Buffer_Udp.LS_ES_EXT);
+      digitalWrite(MCU_LS_NES_EXT, Buffer_Udp.LS_NES_EXT);
+      digitalWrite(MCU_POWER_OFF, Buffer_Udp.PWR_OFF_DSCT_EXT);
+      previousTimeUdp = currentTimeUdp;
+      }
+    }
+ 
+    if (currentTimeUdp - previousTimeUdp >= intervalTimeUdp) {
+      Buffer_Udp.LS_ARM_EXT = 0;
+      digitalWrite(MCU_LS_ARM_EXT, 0);
+      Buffer_Udp.LS_ES_EXT = 0;
+      digitalWrite(MCU_LS_ES_EXT, 0);
+      Buffer_Udp.LS_NES_EXT = 0;
+      digitalWrite(MCU_LS_NES_EXT, 0);
+      Buffer_Udp.PWR_OFF_DSCT_EXT = 0;
+      digitalWrite(MCU_POWER_OFF, 0);
+    }
+    uint8_t reading_INTL = digitalRead(MCU_INTERLOCK); 
+    if (reading_INTL != lastDataINTL){
+      uint32_t lastDebounceTimeINTL = millis();
+      lastDataINTL = reading_INTL;
+    }
+    if ((millis() - lastDebounceTimeINTL) > debounceDelay){
+      if (reading_INTL != Buffer_Udp.LS_INTL_EXT){
+        Buffer_Udp.LS_INTL_EXT = reading_INTL;
+      }
+    }
+    Buffer_Udp.ANN_ARM_EXT = digitalRead(MCU_ARM_ANN);
+    Buffer_Udp.ANN_FIRE_EXT = digitalRead(MCU_FIRE_ANN);
+    Buffer_Udp.VDC28_PRT_EXT = digitalRead(MCU_28V_PRT);
+  }
+ 
+  if (timerFlag5Hz) {
+    timerFlag5Hz = false;
+    Udp.beginPacket(destIp, destPort);
+    Udp.write((byte*)&Buffer_Udp, sizeof(ARGOS8_CONTROL_T));
+    Udp.endPacket();
+  }
+}
+ 
+void timerISR() {
+  timerFlag100Hz = true;
+  timerCount++; 
+  if (timerCount >= trickTimer) { 
+    timerFlag5Hz = true;
+    timerCount = 0;
+  }
+}
