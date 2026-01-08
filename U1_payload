@@ -1,0 +1,134 @@
+#include <SPI.h>
+#include <Ethernet.h>
+#include <TimerOne.h>
+#include <stdint.h>
+ 
+typedef struct {
+  uint8_t LS_ARM_EXT : 1;         
+  uint8_t LS_INTL_EXT : 1;        
+  uint8_t LS_ES_EXT : 1;         
+  uint8_t LS_NES_EXT : 1;         
+  uint8_t ANN_ARM_EXT : 1;        
+  uint8_t ANN_FIRE_EXT : 1;       
+  uint8_t VDC28_PRT_EXT : 1;      
+  uint8_t PWR_OFF_DSCT_EXT : 1;   
+} ARGOS8_CONTROL_T;
+
+ARGOS8_CONTROL_T argos8_status;
+ 
+#define OUTPUT_MCU_LS_ARM_EXT 2   
+#define OUTPUT_MCU_POWER_OFF 3    
+#define OUTPUT_MCU_LS_ES_EXT 4    
+#define OUTPUT_MCU_LS_NES_EXT 5   
+#define INPUT_MCU_28V_PRT 6      
+#define INPUT_MCU_FIRE_ANN 7     
+#define INPUT_MCU_ARM_ANN 8      
+#define INPUT_MCU_INTERLOCK 9    
+ 
+const byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
+IPAddress ip(192, 168, 200, 8);
+IPAddress destIp(192, 168, 200, 255);
+const uint16_t localPort = 1161;
+const uint16_t destPort = 1150;
+EthernetUDP Udp;
+ 
+uint32_t previousTimeUdp = 0;
+const uint16_t intervalTimeUdp = 10000;
+
+bool timerFlag100Hz = false;
+uint8_t timerCount = 0;
+uint8_t trick5Hz = 20; //10 * 20 = 200 ms
+
+uint32_t lastDebounceTimeINTL = 0;
+const uint8_t debounceDelay = 50;
+ 
+void setup() {
+  Serial.begin(9600);
+  pinMode(OUTPUT_MCU_LS_ARM_EXT, OUTPUT);
+  pinMode(OUTPUT_MCU_POWER_OFF, OUTPUT);
+  pinMode(OUTPUT_MCU_LS_ES_EXT, OUTPUT);
+  pinMode(OUTPUT_MCU_LS_NES_EXT, OUTPUT);
+ 
+  digitalWrite(OUTPUT_MCU_LS_ARM_EXT, 0);
+  digitalWrite(OUTPUT_MCU_LS_ES_EXT, 0);
+  digitalWrite(OUTPUT_MCU_LS_NES_EXT, 0);
+  digitalWrite(OUTPUT_MCU_POWER_OFF, 0);
+ 
+  pinMode(INPUT_MCU_28V_PRT, INPUT);
+  pinMode(INPUT_MCU_FIRE_ANN, INPUT);
+  pinMode(INPUT_MCU_ARM_ANN, INPUT);
+  pinMode(INPUT_MCU_INTERLOCK, INPUT);
+ 
+  Ethernet.begin(mac, ip);
+  Udp.begin(localPort);
+ 
+  Timer1.initialize(10000);
+  Timer1.attachInterrupt(timerISR);
+}
+ 
+void loop() {
+  if (timerFlag100Hz) {
+    timerFlag100Hz = false;
+    // For debug
+    Serial.print("data : ");
+    Serial.print(argos8_status.PWR_OFF_DSCT_EXT);
+    Serial.print(argos8_status.VDC28_PRT_EXT);
+    Serial.print(argos8_status.ANN_FIRE_EXT);
+    Serial.print(argos8_status.ANN_ARM_EXT);
+    Serial.print(" ");
+    Serial.print(argos8_status.LS_NES_EXT);
+    Serial.print(argos8_status.LS_ES_EXT);
+    Serial.print(argos8_status.LS_INTL_EXT);
+    Serial.println(argos8_status.LS_ARM_EXT);
+ 
+    uint32_t currentTimeUdp = millis();
+    uint8_t packetSize = Udp.parsePacket();
+ 
+    if (packetSize > 0) {
+      uint8_t packetBuffer[5];
+      Udp.read(packetBuffer, packetSize);
+      
+      if (packetSize == 1){
+      memcpy(&argos8_status, &packetBuffer, 1);
+      digitalWrite(OUTPUT_MCU_LS_ARM_EXT, argos8_status.LS_ARM_EXT);
+      digitalWrite(OUTPUT_MCU_LS_ES_EXT, argos8_status.LS_ES_EXT);
+      digitalWrite(OUTPUT_MCU_LS_NES_EXT, argos8_status.LS_NES_EXT);
+      digitalWrite(OUTPUT_MCU_POWER_OFF, argos8_status.PWR_OFF_DSCT_EXT);
+      previousTimeUdp = currentTimeUdp;
+      }
+    }
+ 
+    if (currentTimeUdp - previousTimeUdp >= intervalTimeUdp) {
+      argos8_status.LS_ARM_EXT = 0;
+      digitalWrite(OUTPUT_MCU_LS_ARM_EXT, 0);
+      argos8_status.LS_ES_EXT = 0;
+      digitalWrite(OUTPUT_MCU_LS_ES_EXT, 0);
+      argos8_status.LS_NES_EXT = 0;
+      digitalWrite(OUTPUT_MCU_LS_NES_EXT, 0);
+      argos8_status.PWR_OFF_DSCT_EXT = 0;
+      digitalWrite(OUTPUT_MCU_POWER_OFF, 0);
+    }
+    uint8_t reading_INTL = digitalRead(INPUT_MCU_INTERLOCK); 
+    if (reading_INTL != argos8_status.LS_INTL_EXT){
+    if ((millis() - lastDebounceTimeINTL) > debounceDelay){
+      lastDebounceTimeINTL = millis();
+        argos8_status.LS_INTL_EXT = reading_INTL;
+      }
+    }
+    argos8_status.ANN_ARM_EXT = digitalRead(INPUT_MCU_ARM_ANN);
+    argos8_status.ANN_FIRE_EXT = digitalRead(INPUT_MCU_FIRE_ANN);
+    argos8_status.VDC28_PRT_EXT = digitalRead(INPUT_MCU_28V_PRT);
+  }
+ 
+  if (timerCount >= trick5Hz) {
+    timerCount = 0;
+    Udp.beginPacket(destIp, destPort);
+    Udp.write((byte*)&argos8_status, sizeof(ARGOS8_CONTROL_T));
+    Udp.endPacket();
+  }
+}
+ 
+void timerISR() {
+  timerFlag100Hz = true;
+  timerCount++; 
+}
