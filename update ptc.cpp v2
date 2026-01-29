@@ -40,15 +40,15 @@ const uint16_t DiscoProtocol::crc16tab[256] = {
 };
 
 DiscoProtocol::DiscoProtocol() : ModuleParams(nullptr){}
-
+//-----open port uart-----//
 int DiscoProtocol::open_uart(){
-	int fd = open(UART_PORT, O_RDONLY | O_NOCTTY | O_NONBLOCK);
+	int fd = open(UART_PORT, O_RDWR | O_NOCTTY | O_NONBLOCK);
 	if(fd < 0) return -1;
-
+	//-----setting port uart-----//
 	struct termios uart_config;
 	tcgetattr(fd, &uart_config);
 	cfsetispeed(&uart_config, UART_BAUDRATE);
-	//cfsetospeed(&uart_config, UART_BAUDRATE);
+	cfsetospeed(&uart_config, UART_BAUDRATE);
 	uart_config.c_cflag |= (CLOCAL | CREAD);
 	uart_config.c_cflag &= ~CSIZE;
 	uart_config.c_cflag |= CS8;
@@ -58,7 +58,7 @@ int DiscoProtocol::open_uart(){
 	tcsetattr(fd, TCSANOW, &uart_config);
 	return fd;
 }
-
+//-----header checksum-----//
 uint8_t DiscoProtocol::cal_header_check(const uint8_t* pkt){
 	const uint8_t* ptr = (const uint8_t*)pkt;
 	uint16_t sum = 0;
@@ -67,7 +67,7 @@ uint8_t DiscoProtocol::cal_header_check(const uint8_t* pkt){
 	}
 	return (uint8_t)sum;
 }
-
+//-----checksum-----//
 uint16_t DiscoProtocol::GetCRC16(const void *buf, unsigned len){
 	uint16_t crc;
 	const uint8_t *bf;
@@ -78,7 +78,7 @@ uint16_t DiscoProtocol::GetCRC16(const void *buf, unsigned len){
 	} while (--len);
 	return ~crc;
 }
-
+//-----main loop-----//
 void DiscoProtocol::run()
 {
 	int fd = open_uart();
@@ -88,17 +88,21 @@ void DiscoProtocol::run()
 	}
 
 	uint8_t packet_buffer[MAX_PACKET_SIZE];
-
+	//-----waiting stop cmd-----//
 	while(!should_exit()) {
-
+		//-----read packet header-----//
 		int n = read(fd, packet_buffer, 17);
 		if(n != 17){
+			usleep(20000);
 			continue;
 		}
 
 		MESSAGE_HEADER* header = (MESSAGE_HEADER*)packet_buffer;
+		//-----check hi-low byte-----//
 		if(header->protocol_iden_hi != 0x5A || header->protocol_iden_low != 0xA5) continue;
+		//-----header checksum-----//
 		if(cal_header_check(packet_buffer) != header->header_check) continue;
+		//-----check data length-----//
 		n = read(fd, &packet_buffer[17], 2);
 		if(n != 2) continue;
 		uint8_t data_len = packet_buffer[18];
@@ -106,26 +110,39 @@ void DiscoProtocol::run()
 			PX4_WARN("Packet too large : %d", data_len);
 			continue;
 		}
+		//-----read payload-----//
 		n = read(fd, &packet_buffer[19], data_len);
 		if(n != data_len) continue;
+		//-----read crc-----//
 		n = read(fd, &packet_buffer[19 + data_len], 2);
 		if(n != 2) continue;
 		int total_size = 19 + data_len + 2;
 		uint16_t received_crc;
 		memcpy(&received_crc, &packet_buffer[total_size - 2], sizeof(received_crc));
+		//------checksun-----//
 		if(GetCRC16(packet_buffer, total_size - 2) != received_crc) continue;
 
 		MESSAGE_HEADER message;
 		memcpy(&message, &packet_buffer, sizeof(MESSAGE_HEADER));
-
-		//     float left_flap_pct = (msg->user_data.left_flap_cmd / 32767.0f) * 140.0f;
-		//     float brake_pct     = (msg->user_data.brake_cmd / 200.0f) * 100.0f;
-
-		//     printf("[VALID] L_Flap: %.2f%%, Brake: %.2f%%\n",
-		//            (double)left_flap_pct, (double)brake_pct);
+		PAYLOAD_DISCO data_percent;
+		data_percent.packet_id = message.user_data.packet_id;
+		data_percent.length_in_bytes = message.user_data.length_in_bytes;
+		data_percent.left_flap_cmd = (int)(message.user_data.left_flap_cmd *140/32767);
+		data_percent.right_flap_cmd = (int)(message.user_data.right_flap_cmd *140/32767);
+		data_percent.left_aileron_cmd = (int)(message.user_data.left_aileron_cmd *140/32767);
+		data_percent.right_aileron_cmd = (int)(message.user_data.right_aileron_cmd *140/32767);
+		data_percent.left_elevator_cmd = (int)(message.user_data.left_elevator_cmd *140/32767);
+		data_percent.right_elevator_cmd = (int)(message.user_data.right_elevator_cmd *140/32767);
+		data_percent.left_rudder_cmd = (int)(message.user_data.left_rudder_cmd *140/32767);
+		data_percent.right_rudder_cmd = (int)(message.user_data.right_rudder_cmd *140/32767);
+		data_percent.throttle_cmd = (int)(message.user_data.throttle_cmd *140/32767);
+		data_percent.nose_wheel_cmd = (int)(message.user_data.nose_wheel_cmd *140/32767);
+		data_percent.brake_cmd = message.user_data.brake_cmd / 2.0f;
+		(void)data_percent;
 		PX4_INFO("%u %u %u %u %u %u %u %u %u %u %u %u",(unsigned int)message.protocol_iden_hi, (unsigned int)message.protocol_iden_low, (unsigned int)message.protocol_version, (unsigned int)message.take_control, (unsigned int)message.source_id, (unsigned int)message.destination_id, (unsigned int)message.sequence, (unsigned int)message.length, (unsigned int)message.unix_time_stamp, (unsigned int)message.utc_microsecond_time_stamp, (unsigned int)message.header_check, message.checksum );
 		PX4_INFO("%u %u %d %d %d %d %d %d %d %d %d %d %u",(unsigned int)message.user_data.packet_id, (unsigned int)message.user_data.length_in_bytes, message.user_data.left_flap_cmd, message.user_data.right_flap_cmd, message.user_data.left_aileron_cmd, message.user_data.right_aileron_cmd, message.user_data.left_elevator_cmd, message.user_data.right_elevator_cmd, message.user_data.left_rudder_cmd, message.user_data.right_rudder_cmd, message.user_data.throttle_cmd, message.user_data.nose_wheel_cmd, (unsigned int)message.user_data.brake_cmd);
-		usleep(20000);
+		//PX4_INFO("%d %d %d %d %d %d %d %d %d %d %u", data_percent.left_flap_cmd, data_percent.right_flap_cmd, data_percent.left_aileron_cmd, data_percent.right_aileron_cmd, data_percent.left_elevator_cmd, data_percent.right_elevator_cmd, data_percent.left_rudder_cmd, data_percent.right_rudder_cmd, data_percent.throttle_cmd, data_percent.nose_wheel_cmd, (unsigned int)data_percent.brake_cmd);
+		//write(fd, &data_percent, sizeof(PAYLOAD_DISCO));
 	}
 
 	close(fd);
