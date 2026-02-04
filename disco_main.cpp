@@ -113,4 +113,3 @@ extern "C" __EXPORT int u1_protocol_main(int argc, char *argv[])
 {
 	return DiscoProtocol::main(argc, argv);
 }
-.
